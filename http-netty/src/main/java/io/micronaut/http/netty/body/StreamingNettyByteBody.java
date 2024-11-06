@@ -182,16 +182,6 @@ public final class StreamingNettyByteBody extends NettyByteBody implements Close
     }
 
     @Override
-    public @NonNull CloseableByteBody move() {
-        BufferConsumer.Upstream upstream = this.upstream;
-        if (upstream == null) {
-            failClaim();
-        }
-        this.upstream = null;
-        return new StreamingNettyByteBody(sharedBuffer, forceDelaySubscribe, upstream);
-    }
-
-    @Override
     public void close() {
         BufferConsumer.Upstream upstream = this.upstream;
         if (upstream == null) {

@@ -157,11 +157,6 @@ public final class AvailableNettyByteBody extends NettyByteBody implements Close
     }
 
     @Override
-    public @NonNull CloseableByteBody move() {
-        return new AvailableNettyByteBody(claim());
-    }
-
-    @Override
     public @NonNull String toString(Charset charset) {
         ByteBuf b = claim();
         try {

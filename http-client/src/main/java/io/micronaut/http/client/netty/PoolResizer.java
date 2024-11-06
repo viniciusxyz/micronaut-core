@@ -17,17 +17,15 @@ package io.micronaut.http.client.netty;
 
 import io.micronaut.core.annotation.Internal;
 import io.micronaut.core.annotation.Nullable;
-import io.micronaut.core.execution.DelayedExecutionFlow;
-import io.micronaut.core.execution.ExecutionFlow;
 import io.micronaut.http.client.HttpClientConfiguration;
 import io.micronaut.http.client.exceptions.HttpClientException;
 import org.slf4j.Logger;
+import reactor.core.publisher.Sinks;
 
 import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -52,7 +50,7 @@ abstract class PoolResizer {
 
     private final AtomicInteger pendingConnectionCount = new AtomicInteger(0);
 
-    private final Deque<PendingRequest> pendingRequests = new ConcurrentLinkedDeque<>();
+    private final Deque<PoolSink<ConnectionManager.PoolHandle>> pendingRequests = new ConcurrentLinkedDeque<>();
     private final List<ResizerConnection> http1Connections = new CopyOnWriteArrayList<>();
     private final List<ResizerConnection> http2Connections = new CopyOnWriteArrayList<>();
 
@@ -101,7 +99,7 @@ abstract class PoolResizer {
     private void doSomeWork() {
         BlockHint blockedPendingRequests = null;
         while (true) {
-            PendingRequest toDispatch = pendingRequests.pollFirst();
+            PoolSink<ConnectionManager.PoolHandle> toDispatch = pendingRequests.pollFirst();
             if (toDispatch == null) {
                 break;
             }
@@ -123,7 +121,7 @@ abstract class PoolResizer {
             if (!dispatched) {
                 pendingRequests.addFirst(toDispatch);
                 blockedPendingRequests =
-                    BlockHint.combine(blockedPendingRequests, toDispatch.blockHint);
+                    BlockHint.combine(blockedPendingRequests, toDispatch.getBlockHint());
                 break;
             }
         }
@@ -166,12 +164,12 @@ abstract class PoolResizer {
         }
     }
 
-    private boolean dispatchSafe(ResizerConnection connection, PendingRequest toDispatch) {
+    private boolean dispatchSafe(ResizerConnection connection, PoolSink<ConnectionManager.PoolHandle> toDispatch) {
         try {
             return connection.dispatch(toDispatch);
         } catch (Exception e) {
             try {
-                if (!toDispatch.tryCompleteExceptionally(e)) {
+                if (toDispatch.tryEmitError(e) != Sinks.EmitResult.OK) {
                     // this is probably fine, log it anyway
                     log.debug("Failure during connection dispatch operation, but dispatch request was already complete.", e);
                 }
@@ -226,18 +224,19 @@ abstract class PoolResizer {
         dirty();
     }
 
-    final void addPendingRequest(PendingRequest sink) {
+    final void addPendingRequest(PoolSink<ConnectionManager.PoolHandle> sink) {
         int maxPendingAcquires = connectionPoolConfiguration.getMaxPendingAcquires();
         if (maxPendingAcquires != Integer.MAX_VALUE && pendingRequests.size() >= maxPendingAcquires) {
-            sink.tryCompleteExceptionally(new HttpClientException("Cannot acquire connection, exceeded max pending acquires configuration"));
+            sink.tryEmitError(new HttpClientException("Cannot acquire connection, exceeded max pending acquires configuration"));
             return;
         }
         pendingRequests.addLast(sink);
         dirty();
     }
 
-    final PendingRequest pollPendingRequest() {
-        PendingRequest req = pendingRequests.pollFirst();
+    @Nullable
+    final Sinks.One<ConnectionManager.PoolHandle> pollPendingRequest() {
+        Sinks.One<ConnectionManager.PoolHandle> req = pendingRequests.pollFirst();
         if (req != null) {
             dirty();
         }
@@ -282,42 +281,6 @@ abstract class PoolResizer {
          * @return {@code true} if the acquisition may succeed (if it fails later, the pending
          * request must be readded), or {@code false} if it fails immediately
          */
-        abstract boolean dispatch(PendingRequest sink) throws Exception;
-    }
-
-    static final class PendingRequest extends AtomicBoolean {
-        final @Nullable BlockHint blockHint;
-        private final DelayedExecutionFlow<ConnectionManager.PoolHandle> sink = DelayedExecutionFlow.create();
-
-        PendingRequest(@Nullable BlockHint blockHint) {
-            this.blockHint = blockHint;
-        }
-
-        ExecutionFlow<ConnectionManager.PoolHandle> flow() {
-            return sink;
-        }
-
-        // DelayedExecutionFlow does not allow concurrent completes, so this is a simple guard
-
-        boolean tryCompleteExceptionally(Throwable t) {
-            if (compareAndSet(false, true)) {
-                sink.completeExceptionally(t);
-                return true;
-            } else {
-                return false;
-            }
-        }
-
-        boolean tryComplete(ConnectionManager.PoolHandle value) {
-            if (compareAndSet(false, true)) {
-                if (sink.isCancelled()) {
-                    return false;
-                }
-                sink.complete(value);
-                return true;
-            } else {
-                return false;
-            }
-        }
+        abstract boolean dispatch(PoolSink<ConnectionManager.PoolHandle> sink) throws Exception;
     }
 }

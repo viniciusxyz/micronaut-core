@@ -161,11 +161,6 @@ public final class InputStreamByteBody implements CloseableByteBody, InternalByt
         });
     }
 
-    @Override
-    public @NonNull CloseableByteBody move() {
-        return new InputStreamByteBody(context, toInputStream());
-    }
-
     private record Context(
         OptionalLong expectedLength,
         Executor ioExecutor,

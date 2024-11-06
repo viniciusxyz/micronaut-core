@@ -16,7 +16,6 @@
 package io.micronaut.http.reactive.execution;
 
 import io.micronaut.core.annotation.Internal;
-import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.execution.ExecutionFlow;
 import io.micronaut.core.execution.ImperativeExecutionFlow;
@@ -30,8 +29,6 @@ import reactor.core.publisher.Sinks;
 import reactor.util.context.Context;
 import reactor.util.context.ContextView;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
@@ -48,7 +45,6 @@ import java.util.function.Supplier;
 final class ReactorExecutionFlowImpl implements ReactiveExecutionFlow<Object> {
 
     private Mono<Object> value;
-    private List<Subscription> subscriptionsToCancel = new ArrayList<>(1);
 
     <K> ReactorExecutionFlowImpl(Publisher<K> value) {
         this(value instanceof Flux<K> flux ? flux.next() : Mono.from(value));
@@ -89,30 +85,6 @@ final class ReactorExecutionFlowImpl implements ReactiveExecutionFlow<Object> {
     }
 
     @Override
-    public @NonNull ExecutionFlow<Object> putInContextIfAbsent(@NonNull String key, @NonNull Object value) {
-        this.value = this.value.contextWrite(context -> {
-            if (!context.hasKey(key)) {
-                return context.put(key, value);
-            } else {
-                return context;
-            }
-        });
-        return this;
-    }
-
-    @Override
-    public void cancel() {
-        List<Subscription> stc;
-        synchronized (this) {
-            stc = subscriptionsToCancel;
-            subscriptionsToCancel = null;
-        }
-        for (Subscription subscription : stc) {
-            subscription.cancel();
-        }
-    }
-
-    @Override
     public void onComplete(BiConsumer<? super Object, Throwable> fn) {
         value.subscribe(new CoreSubscriber<>() {
 
@@ -130,20 +102,7 @@ final class ReactorExecutionFlowImpl implements ReactiveExecutionFlow<Object> {
             @Override
             public void onSubscribe(Subscription s) {
                 this.subscription = s;
-                boolean cancel;
-                synchronized (ReactorExecutionFlowImpl.this) {
-                    if (subscriptionsToCancel == null) {
-                        cancel = true;
-                    } else {
-                        subscriptionsToCancel.add(subscription);
-                        cancel = false;
-                    }
-                }
-                if (cancel) {
-                    s.cancel();
-                } else {
-                    s.request(1);
-                }
+                s.request(1);
             }
 
             @Override
@@ -214,7 +173,7 @@ final class ReactorExecutionFlowImpl implements ReactiveExecutionFlow<Object> {
                     }
                 };
                 next.onComplete(reactiveConsumer);
-                return sink.asMono().doOnCancel(next::cancel);
+                return sink.asMono();
             });
         }
     }
