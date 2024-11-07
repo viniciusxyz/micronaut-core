@@ -21,6 +21,7 @@ import io.micronaut.core.annotation.AnnotationMetadataResolver;
 import io.micronaut.core.annotation.Internal;
 import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Nullable;
+import io.micronaut.core.async.propagation.ReactivePropagation;
 import io.micronaut.core.async.publisher.Publishers;
 import io.micronaut.core.beans.BeanMap;
 import io.micronaut.core.convert.ConversionService;
@@ -31,7 +32,6 @@ import io.micronaut.core.io.ResourceResolver;
 import io.micronaut.core.io.buffer.ByteBuffer;
 import io.micronaut.core.io.buffer.ByteBufferFactory;
 import io.micronaut.core.io.buffer.ReferenceCounted;
-import io.micronaut.core.order.Ordered;
 import io.micronaut.core.propagation.PropagatedContext;
 import io.micronaut.core.type.Argument;
 import io.micronaut.core.util.ArrayUtils;
@@ -74,7 +74,6 @@ import io.micronaut.http.client.exceptions.HttpClientResponseException;
 import io.micronaut.http.client.exceptions.NoHostException;
 import io.micronaut.http.client.exceptions.ReadTimeoutException;
 import io.micronaut.http.client.filter.ClientFilterResolutionContext;
-import io.micronaut.http.client.filters.ClientServerContextFilter;
 import io.micronaut.http.client.multipart.MultipartBody;
 import io.micronaut.http.client.multipart.MultipartDataFactory;
 import io.micronaut.http.client.netty.ssl.ClientSslBuilder;
@@ -83,8 +82,6 @@ import io.micronaut.http.client.netty.websocket.NettyWebSocketClientHandler;
 import io.micronaut.http.client.sse.SseClient;
 import io.micronaut.http.codec.MediaTypeCodecRegistry;
 import io.micronaut.http.context.ContextPathUtils;
-import io.micronaut.http.context.ServerRequestContext;
-import io.micronaut.http.filter.FilterOrder;
 import io.micronaut.http.filter.FilterRunner;
 import io.micronaut.http.filter.GenericHttpFilter;
 import io.micronaut.http.filter.HttpClientFilter;
@@ -774,6 +771,10 @@ public class DefaultHttpClient implements
                 }), FluxSink.OverflowStrategy.BUFFER);
     }
 
+    private static <T> Mono<T> toMono(ExecutionFlow<T> flow, PropagatedContext context) {
+        return Mono.from(ReactivePropagation.propagate(context, ReactiveExecutionFlow.toPublisher(() -> flow)));
+    }
+
     @Override
     public <I, B> Publisher<Event<B>> eventStream(@NonNull io.micronaut.http.HttpRequest<I> request,
                                                   @NonNull Argument<B> eventType) {
@@ -802,9 +803,9 @@ public class DefaultHttpClient implements
     @Override
     public <I> Publisher<ByteBuffer<?>> dataStream(@NonNull io.micronaut.http.HttpRequest<I> request, @NonNull Argument<?> errorType) {
         setupConversionService(request);
-        final io.micronaut.http.HttpRequest<Object> parentRequest = ServerRequestContext.currentRequest().orElse(null);
-        return new MicronautFlux<>(Flux.from(ReactiveExecutionFlow.toPublisher(() -> resolveRequestURI(request)))
-                .flatMap(requestURI -> dataStreamImpl(toMutableRequest(request), errorType, parentRequest, requestURI)))
+        PropagatedContext propagatedContext = PropagatedContext.getOrEmpty();
+        return new MicronautFlux<>(toMono(resolveRequestURI(request), propagatedContext)
+                .flatMapMany(requestURI -> dataStreamImpl(toMutableRequest(request), errorType, propagatedContext, requestURI)))
                 .doAfterNext(buffer -> {
                     Object o = buffer.asNativeBuffer();
                     if (o instanceof ByteBuf byteBuf) {
@@ -823,9 +824,9 @@ public class DefaultHttpClient implements
     @Override
     public <I> Publisher<HttpResponse<ByteBuffer<?>>> exchangeStream(@NonNull io.micronaut.http.HttpRequest<I> request, @NonNull Argument<?> errorType) {
         setupConversionService(request);
-        io.micronaut.http.HttpRequest<Object> parentRequest = ServerRequestContext.currentRequest().orElse(null);
-        return new MicronautFlux<>(Flux.from(ReactiveExecutionFlow.toPublisher(() -> resolveRequestURI(request)))
-                .flatMap(uri -> exchangeStreamImpl(parentRequest, toMutableRequest(request), errorType, uri)))
+        PropagatedContext propagatedContext = PropagatedContext.getOrEmpty();
+        return new MicronautFlux<>(toMono(resolveRequestURI(request), propagatedContext)
+                .flatMapMany(uri -> exchangeStreamImpl(propagatedContext, toMutableRequest(request), errorType, uri)))
                 .doAfterNext(byteBufferHttpResponse -> {
                     ByteBuffer<?> buffer = byteBufferHttpResponse.body();
                     if (buffer instanceof ReferenceCounted counted) {
@@ -842,10 +843,9 @@ public class DefaultHttpClient implements
     @Override
     public <I, O> Publisher<O> jsonStream(@NonNull io.micronaut.http.HttpRequest<I> request, @NonNull Argument<O> type, @NonNull Argument<?> errorType) {
         setupConversionService(request);
-        final io.micronaut.http.HttpRequest<Object> parentRequest = ServerRequestContext.currentRequest().orElse(null);
-        setupConversionService(parentRequest);
-        return Flux.from(ReactiveExecutionFlow.toPublisher(() -> resolveRequestURI(request)))
-                .flatMap(requestURI -> jsonStreamImpl(parentRequest, toMutableRequest(request), type, errorType, requestURI));
+        PropagatedContext propagatedContext = PropagatedContext.getOrEmpty();
+        return Flux.from(toMono(resolveRequestURI(request), propagatedContext)
+                .flatMapMany(requestURI -> jsonStreamImpl(propagatedContext, toMutableRequest(request), type, errorType, requestURI)));
     }
 
     @SuppressWarnings("unchecked")
@@ -870,12 +870,12 @@ public class DefaultHttpClient implements
     @NonNull
     private <I, O, E> Mono<HttpResponse<O>> exchange(io.micronaut.http.HttpRequest<I> request, Argument<O> bodyType, Argument<E> errorType, @Nullable BlockHint blockHint) {
         setupConversionService(request);
-        final io.micronaut.http.HttpRequest<Object> parentRequest = ServerRequestContext.currentRequest().orElse(null);
+        PropagatedContext propagatedContext = PropagatedContext.getOrEmpty();
         ExecutionFlow<HttpResponse<O>> mono = resolveRequestURI(request).flatMap(uri -> {
             MutableHttpRequest<?> mutableRequest = toMutableRequest(request).uri(uri);
             //noinspection unchecked
             return sendRequestWithRedirects(
-                parentRequest,
+                propagatedContext,
                 blockHint,
                 mutableRequest,
                 (req, resp) -> InternalByteBody.bufferFlow(resp.byteBody())
@@ -902,8 +902,7 @@ public class DefaultHttpClient implements
                     });
             }
         }
-        ExecutionFlow<HttpResponse<O>> finalMono = mono;
-        return Mono.from(ReactiveExecutionFlow.toPublisher(() -> finalMono));
+        return toMono(mono, propagatedContext);
     }
 
     private <O, E> @NonNull ExecutionFlow<FullNettyClientHttpResponse<O>> handleExchangeResponse(Argument<O> bodyType, Argument<E> errorType, NettyClientByteBodyResponse resp, CloseableAvailableByteBody av) {
@@ -994,8 +993,7 @@ public class DefaultHttpClient implements
     @Override
     public <T extends AutoCloseable> Publisher<T> connect(Class<T> clientEndpointType, MutableHttpRequest<?> request) {
         setupConversionService(request);
-        ExecutionFlow<URI> uriPublisher = resolveRequestURI(request);
-        return Flux.from(ReactiveExecutionFlow.toPublisher(() -> uriPublisher))
+        return toMono(resolveRequestURI(request), PropagatedContext.getOrEmpty()).flux()
                 .switchMap(resolvedURI -> connectWebSocket(resolvedURI, request, clientEndpointType, null));
     }
 
@@ -1005,9 +1003,7 @@ public class DefaultHttpClient implements
         String uri = webSocketBean.getBeanDefinition().stringValue(ClientWebSocket.class).orElse("/ws");
         uri = UriTemplate.of(uri).expand(parameters);
         MutableHttpRequest<Object> request = io.micronaut.http.HttpRequest.GET(uri);
-        ExecutionFlow<URI> uriPublisher = resolveRequestURI(request);
-
-        return Flux.from(ReactiveExecutionFlow.toPublisher(() -> uriPublisher))
+        return toMono(resolveRequestURI(request), PropagatedContext.getOrEmpty()).flux()
                 .switchMap(resolvedURI -> connectWebSocket(resolvedURI, request, clientEndpointType, webSocketBean));
 
     }
@@ -1064,8 +1060,8 @@ public class DefaultHttpClient implements
             .then(handler.getHandshakeCompletedMono());
     }
 
-    private <I> Flux<HttpResponse<ByteBuffer<?>>> exchangeStreamImpl(io.micronaut.http.HttpRequest<Object> parentRequest, MutableHttpRequest<I> request, Argument<?> errorType, URI requestURI) {
-        Flux<HttpResponse<?>> streamResponsePublisher = Flux.from(ReactiveExecutionFlow.toPublisher(() -> buildStreamExchange(parentRequest, request, requestURI, errorType)));
+    private <I> Flux<HttpResponse<ByteBuffer<?>>> exchangeStreamImpl(PropagatedContext propagatedContext, MutableHttpRequest<I> request, Argument<?> errorType, URI requestURI) {
+        Flux<HttpResponse<?>> streamResponsePublisher = toMono(buildStreamExchange(propagatedContext, request, requestURI, errorType), propagatedContext).flux();
         return streamResponsePublisher.switchMap(response -> {
             StreamedHttpResponse streamedHttpResponse = NettyHttpResponseBuilder.toStreamResponse(response);
             Flux<HttpContent> httpContentReactiveSequence = Flux.from(streamedHttpResponse);
@@ -1086,8 +1082,8 @@ public class DefaultHttpClient implements
         });
     }
 
-    private <I, O> Flux<O> jsonStreamImpl(io.micronaut.http.HttpRequest<?> parentRequest, MutableHttpRequest<I> request, Argument<O> type, Argument<?> errorType, URI requestURI) {
-        return Flux.from(ReactiveExecutionFlow.toPublisher(() -> buildStreamExchange(parentRequest, request, requestURI, errorType))).switchMap(response -> {
+    private <I, O> Flux<O> jsonStreamImpl(PropagatedContext propagatedContext, MutableHttpRequest<I> request, Argument<O> type, Argument<?> errorType, URI requestURI) {
+        return toMono(buildStreamExchange(propagatedContext, request, requestURI, errorType), propagatedContext).flux().switchMap(response -> {
             if (!(response instanceof NettyStreamedHttpResponse)) {
                 throw new IllegalStateException("Response has been wrapped in non streaming type. Do not wrap the response in client filters for stream requests");
             }
@@ -1101,8 +1097,8 @@ public class DefaultHttpClient implements
         });
     }
 
-    private <I> Flux<ByteBuffer<?>> dataStreamImpl(MutableHttpRequest<I> request, Argument<?> errorType, io.micronaut.http.HttpRequest<Object> parentRequest, URI requestURI) {
-        Flux<HttpResponse<?>> streamResponsePublisher = Flux.from(ReactiveExecutionFlow.toPublisher(() -> buildStreamExchange(parentRequest, request, requestURI, errorType)));
+    private <I> Flux<ByteBuffer<?>> dataStreamImpl(MutableHttpRequest<I> request, Argument<?> errorType, PropagatedContext propagatedContext, URI requestURI) {
+        Flux<HttpResponse<?>> streamResponsePublisher = toMono(buildStreamExchange(propagatedContext, request, requestURI, errorType), propagatedContext).flux();
         Function<HttpContent, ByteBuffer<?>> contentMapper = message -> {
             ByteBuf byteBuf = message.content();
             return byteBufferFactory.wrap(byteBuf);
@@ -1124,12 +1120,12 @@ public class DefaultHttpClient implements
      */
     @SuppressWarnings("MagicNumber")
     private <I> ExecutionFlow<HttpResponse<?>> buildStreamExchange(
-            @Nullable io.micronaut.http.HttpRequest<?> parentRequest,
+            @Nullable PropagatedContext propagatedContext,
             @NonNull MutableHttpRequest<I> request,
             @NonNull URI requestURI,
             @Nullable Argument<?> errorType) {
         return this.sendRequestWithRedirects(
-            parentRequest,
+            propagatedContext,
             null,
             request.uri(requestURI),
             (req, resp) -> {
@@ -1180,7 +1176,8 @@ public class DefaultHttpClient implements
     public Publisher<MutableHttpResponse<?>> proxy(@NonNull io.micronaut.http.HttpRequest<?> request, @NonNull ProxyRequestOptions options) {
         Objects.requireNonNull(options, "options");
         setupConversionService(request);
-        return Flux.from(ReactiveExecutionFlow.toPublisher(() -> resolveRequestURI(request)
+        PropagatedContext propagatedContext = PropagatedContext.getOrEmpty();
+        return toMono(resolveRequestURI(request)
                 .flatMap(requestURI -> {
                     MutableHttpRequest<?> httpRequest = toMutableRequest(request);
                     if (!options.isRetainHostHeader()) {
@@ -1188,7 +1185,7 @@ public class DefaultHttpClient implements
                     }
 
                     return this.sendRequestWithRedirects(
-                        request,
+                        propagatedContext,
                         null,
                         httpRequest.uri(requestURI),
                         (req, resp) -> {
@@ -1205,7 +1202,7 @@ public class DefaultHttpClient implements
                         }
                     );
                 })
-            .map(HttpResponse::toMutableResponse)));
+            .map(HttpResponse::toMutableResponse), propagatedContext);
     }
 
     private void setupConversionService(io.micronaut.http.HttpRequest<?> httpRequest) {
@@ -1475,10 +1472,11 @@ public class DefaultHttpClient implements
         if (requestBody == null) {
             requestBody = AvailableNettyByteBody.empty();
         }
+        PropagatedContext propagatedContext = PropagatedContext.getOrEmpty();
         ExecutionFlow<HttpResponse<?>> mono = null;
         try {
             mono = sendRequestWithRedirects(
-                ServerRequestContext.currentRequest().orElse(null),
+                propagatedContext,
                 blockedThread == null ? null : new BlockHint(blockedThread, null),
                 new RawHttpRequestWrapper<>(conversionService, request.toMutableRequest(), requestBody),
                 (req, resp) -> ExecutionFlow.just(resp)
@@ -1488,25 +1486,24 @@ public class DefaultHttpClient implements
                 requestBody.close();
             }
         }
-        ExecutionFlow<HttpResponse<?>> finalMono = mono;
-        return Mono.from(ReactiveExecutionFlow.toPublisher(() -> finalMono)).doOnTerminate(requestBody::close);
+        return toMono(mono, propagatedContext).doOnTerminate(requestBody::close);
     }
 
     /**
      * This is the high-level request method. It sits above {@link #sendRawRequest} and handles
      * things like filters, error handling, response parsing, request writing.
      *
-     * @param parentRequest The parent <i>server</i> request from {@link ServerRequestContext}, for context propagation
-     * @param blockHint     The optional block hint
-     * @param request       The request to send. Must have resolved absolute URI (see {@link #resolveURI})
-     * @param readResponse  Function that reads the response from the raw
-     *                      {@link NettyClientByteBodyResponse} representation. This is run exactly
-     *                      once, but if there is a redirect, it potentially runs with a different
-     *                      request than the original (which is why it has a request parameter)
+     * @param propagatedContext The context propagated from the original client call
+     * @param blockHint         The optional block hint
+     * @param request           The request to send. Must have resolved absolute URI (see {@link #resolveURI})
+     * @param readResponse      Function that reads the response from the raw
+     *                          {@link NettyClientByteBodyResponse} representation. This is run exactly
+     *                          once, but if there is a redirect, it potentially runs with a different
+     *                          request than the original (which is why it has a request parameter)
      * @return A mono containing the response
      */
     private ExecutionFlow<HttpResponse<?>> sendRequestWithRedirects(
-        io.micronaut.http.HttpRequest<?> parentRequest,
+        PropagatedContext propagatedContext,
         @Nullable BlockHint blockHint,
         MutableHttpRequest<?> request,
         BiFunction<MutableHttpRequest<?>, NettyClientByteBodyResponse, ? extends ExecutionFlow<? extends HttpResponse<?>>> readResponse
@@ -1517,12 +1514,6 @@ public class DefaultHttpClient implements
 
         List<GenericHttpFilter> filters =
             filterResolver.resolveFilters(request, clientFilterEntries);
-        if (parentRequest != null) {
-            // todo: migrate to new filter
-            filters.add(
-                GenericHttpFilter.createLegacyFilter(new ClientServerContextFilter(parentRequest), new FilterOrder.Fixed(Ordered.HIGHEST_PRECEDENCE))
-            );
-        }
 
         FilterRunner.sortReverse(filters);
 
@@ -1532,7 +1523,7 @@ public class DefaultHttpClient implements
                 try {
                     try (PropagatedContext.Scope ignore = propagatedContext.propagate()) {
                         return sendRequestWithRedirectsNoFilter(
-                            parentRequest,
+                            propagatedContext,
                             blockHint,
                             MutableHttpRequestWrapper.wrapIfNecessary(conversionService, request),
                             readResponse
@@ -1543,17 +1534,11 @@ public class DefaultHttpClient implements
                 }
             }
         };
-        ExecutionFlow<HttpResponse<?>> responseMono = runner.run(request);
-        if (parentRequest != null) {
-            // existing entry takes precedence. The parentRequest is derived from a thread
-            // local, and is more likely to be wrong than any reactive context we are fed.
-            responseMono = responseMono.putInContextIfAbsent(ServerRequestContext.KEY, parentRequest);
-        }
-        return responseMono;
+        return runner.run(request, propagatedContext);
     }
 
     private ExecutionFlow<HttpResponse<?>> sendRequestWithRedirectsNoFilter(
-        io.micronaut.http.HttpRequest<?> parentRequest,
+        PropagatedContext propagatedContext,
         @Nullable BlockHint blockHint,
         MutableHttpRequest<?> request,
         BiFunction<MutableHttpRequest<?>, NettyClientByteBodyResponse, ? extends ExecutionFlow<? extends HttpResponse<?>>> readResponse
@@ -1610,7 +1595,7 @@ public class DefaultHttpClient implements
 
                     setRedirectHeaders(request, redirectRequest);
                     return resolveRedirectURI(request, redirectRequest)
-                        .flatMap(uri -> sendRequestWithRedirects(parentRequest, blockHint, redirectRequest.uri(uri), readResponse));
+                        .flatMap(uri -> sendRequestWithRedirects(propagatedContext, blockHint, redirectRequest.uri(uri), readResponse));
                 } else {
                     io.micronaut.http.HttpHeaders headers = byteBodyResponse.getHeaders();
                     if (log.isTraceEnabled()) {
