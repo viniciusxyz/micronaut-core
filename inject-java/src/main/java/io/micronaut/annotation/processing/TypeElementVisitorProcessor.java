@@ -275,7 +275,7 @@ public class TypeElementVisitorProcessor extends AbstractInjectAnnotationProcess
                             }
                             error(originatingElement.element(), e.getMessage());
                         } catch (PostponeToNextRoundException e) {
-                            postponedTypes.put(javaClassElement.getName(), e.getErrorElement());
+                            postponedTypes.put(javaClassElement.getCanonicalName(), e.getErrorElement());
                         }
                     }
                 }

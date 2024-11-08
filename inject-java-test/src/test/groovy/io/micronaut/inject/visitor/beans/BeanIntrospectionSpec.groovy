@@ -52,6 +52,65 @@ import java.util.stream.IntStream
 
 class BeanIntrospectionSpec extends AbstractTypeElementSpec {
 
+    void "test inner introspection"() {
+        when:
+        def introspection = buildBeanIntrospection('test.Test$Foo', '''
+package test;
+
+import io.micronaut.core.annotation.Introspected;
+import io.micronaut.core.value.OptionalMultiValues;
+import java.util.*;
+import java.lang.annotation.*;
+import static java.lang.annotation.ElementType.*;
+
+@Introspected
+class Test {
+    @Introspected
+    record Foo(String name) {}
+
+    @Introspected(accessKind = Introspected.AccessKind.FIELD)
+    static class Bar {
+        String name;
+    }
+}
+
+
+    ''' )
+
+        then:
+        introspection != null
+        introspection.getBeanType().simpleName == 'Foo'
+    }
+
+    void "test inner introspection - without outer annotation"() {
+        when:
+        def introspection = buildBeanIntrospection('test.Test$Foo', '''
+package test;
+
+import io.micronaut.core.annotation.Introspected;
+import io.micronaut.core.value.OptionalMultiValues;
+import java.util.*;
+import java.lang.annotation.*;
+import static java.lang.annotation.ElementType.*;
+
+class Test {
+    @Introspected
+    record Foo(String name) {}
+
+    @Introspected(accessKind = Introspected.AccessKind.FIELD)
+    static class Bar {
+        String name;
+    }
+}
+
+
+    ''' )
+
+        then:
+        introspection != null
+        introspection.getBeanType().simpleName == 'Foo'
+    }
+
     void "test annotations"() {
         when:
         def introspection = buildBeanIntrospection('test.Test', '''
