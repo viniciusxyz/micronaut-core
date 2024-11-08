@@ -26,6 +26,7 @@ import io.micronaut.core.execution.ExecutionFlow;
 import io.micronaut.core.propagation.PropagatedContext;
 import io.micronaut.core.type.Argument;
 import io.micronaut.core.util.StringUtils;
+import io.micronaut.http.HttpAttributes;
 import io.micronaut.http.HttpResponse;
 import io.micronaut.http.HttpStatus;
 import io.micronaut.http.MutableHttpRequest;
@@ -411,6 +412,10 @@ abstract class AbstractJdkHttpClient {
         @NonNull io.micronaut.http.HttpRequest<?> request,
         @Nullable Argument<O> bodyType
     ) {
+        if (clientId != null && request.getAttribute(HttpAttributes.SERVICE_ID).isEmpty()) {
+            request.setAttribute(HttpAttributes.SERVICE_ID, clientId);
+        }
+
         return Flux.defer(() -> mapToHttpRequest(request, bodyType)) // defered so any client filter changes are used
             .map(httpRequest -> {
                 if (log.isDebugEnabled()) {
