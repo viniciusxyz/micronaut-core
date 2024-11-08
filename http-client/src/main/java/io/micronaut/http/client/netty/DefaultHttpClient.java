@@ -45,6 +45,7 @@ import io.micronaut.http.HttpStatus;
 import io.micronaut.http.MediaType;
 import io.micronaut.http.MutableHttpHeaders;
 import io.micronaut.http.MutableHttpRequest;
+import io.micronaut.http.MutableHttpRequestWrapper;
 import io.micronaut.http.MutableHttpResponse;
 import io.micronaut.http.bind.DefaultRequestBinderRegistry;
 import io.micronaut.http.bind.RequestBinderRegistry;
@@ -92,7 +93,7 @@ import io.micronaut.http.netty.NettyHttpHeaders;
 import io.micronaut.http.netty.NettyHttpRequestBuilder;
 import io.micronaut.http.netty.NettyHttpResponseBuilder;
 import io.micronaut.http.netty.body.AvailableNettyByteBody;
-import io.micronaut.http.netty.body.BodySizeLimits;
+import io.micronaut.http.body.stream.BodySizeLimits;
 import io.micronaut.http.netty.body.NettyBodyAdapter;
 import io.micronaut.http.netty.body.NettyByteBody;
 import io.micronaut.http.netty.body.NettyByteBufMessageBodyHandler;
@@ -124,7 +125,6 @@ import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.ByteBufHolder;
 import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.EmptyByteBuf;
-import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFactory;
@@ -1822,7 +1822,7 @@ public class DefaultHttpClient implements
                 em.onRequest(n -> {
                     try {
                         while (n-- > 0) {
-                            HttpContent chunk = encoder.readChunk(PooledByteBufAllocator.DEFAULT);
+                            HttpContent chunk = encoder.readChunk(ByteBufAllocator.DEFAULT);
                             if (chunk == null) {
                                 assert encoder.isEndOfInput();
                                 em.complete();
