@@ -1284,14 +1284,14 @@ public class DefaultHttpClient implements
         boolean permitsBody,
         EventLoop eventLoop) throws HttpPostRequestEncoder.ErrorDataEncoderException {
 
-        if (!request.getHeaders().contains(io.micronaut.http.HttpHeaders.HOST)) {
+        if (!request.getHeaders().contains(HttpHeaderNames.HOST)) {
             request.getHeaders().set(HttpHeaderNames.HOST, getHostHeader(requestURI));
         }
 
         if (permitsBody) {
             Optional<?> body = request.getBody();
             if (body.isPresent()) {
-                if (!request.getHeaders().contains(io.micronaut.http.HttpHeaders.CONTENT_TYPE)) {
+                if (!request.getHeaders().contains(HttpHeaderNames.CONTENT_TYPE)) {
                     MediaType mediaType = request.getContentType().orElse(MediaType.APPLICATION_JSON_TYPE);
                     request.getHeaders().set(HttpHeaderNames.CONTENT_TYPE, mediaType);
                 }
@@ -1971,6 +1971,14 @@ public class DefaultHttpClient implements
     }
 
     static boolean isSecureScheme(String scheme) {
+        // fast path
+        if (scheme.equals("http")) {
+            return false;
+        }
+        if (scheme.equals("https")) {
+            return true;
+        }
+        // actual case-insensitive check
         return io.micronaut.http.HttpRequest.SCHEME_HTTPS.equalsIgnoreCase(scheme) || SCHEME_WSS.equalsIgnoreCase(scheme);
     }
 
