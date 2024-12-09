@@ -13,15 +13,36 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.micronaut.inject.failures.ctorexception;
+package io.micronaut.inject.failures.postconstruct;
 
 import io.micronaut.context.annotation.Requires;
 
+import jakarta.annotation.PostConstruct;
+import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 
-@Requires(property = "spec.name", value = "ConstructorExceptionSpec")
+@Requires(property = "spec.name", value = "PostConstructExceptionSpec")
 @Singleton
-public class A {
-    public A(C c) {
+public class MyClassB {
+
+    boolean setupComplete = false;
+    boolean injectedFirst = false;
+
+    @Inject
+    protected MyClassA another;
+    private MyClassA propA;
+
+    @Inject
+    public void setPropA(MyClassA propA) {
+        this.propA = propA;
+    }
+
+    public MyClassA getPropA() {
+        return propA;
+    }
+
+    @PostConstruct
+    public void setup() {
+        throw new RuntimeException("bad");
     }
 }

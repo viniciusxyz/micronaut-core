@@ -13,16 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.micronaut.inject.failures.fieldcirculardependency;
+package io.micronaut.inject.failures.ctorexception;
 
 import io.micronaut.context.annotation.Requires;
 
-import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 
-@Requires(property = "spec.name", value = "FieldCircularDependencyFailureSpec")
+@Requires(property = "spec.name", value = "ConstructorExceptionSpec")
 @Singleton
-public class B {
-    @Inject
-    protected A a;
+public class MyClassA {
+    public MyClassA(MyClassC propC) {
+    }
 }

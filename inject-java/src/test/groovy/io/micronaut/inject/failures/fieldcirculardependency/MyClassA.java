@@ -13,15 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.micronaut.inject.failures.fielddependencymissing;
+package io.micronaut.inject.failures.fieldcirculardependency;
 
-import jakarta.inject.Inject;
+import io.micronaut.context.annotation.Requires;
 
-public class B {
-    @Inject
-    private A a;
+import jakarta.inject.Singleton;
 
-    public A getA() {
-        return this.a;
-    }
+@Requires(property = "spec.name", value = "FieldCircularDependencyFailureSpec")
+@Singleton
+public class MyClassA {
+
+    public MyClassA(MyClassC propC) {}
 }

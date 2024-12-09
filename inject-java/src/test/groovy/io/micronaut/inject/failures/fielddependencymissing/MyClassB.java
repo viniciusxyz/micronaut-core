@@ -13,11 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.micronaut.inject.failures.fieldcirculardependency;
+package io.micronaut.inject.failures.fielddependencymissing;
 
 import jakarta.inject.Inject;
 
-public class C {
+public class MyClassB {
     @Inject
-    protected B b;
+    private MyClassA propA;
+
+    public MyClassA getPropA() {
+        return this.propA;
+    }
 }

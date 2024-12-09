@@ -13,16 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.micronaut.inject.failures.ctorexception;
+package io.micronaut.inject.failures.nesteddependency;
 
 import io.micronaut.context.annotation.Requires;
 
 import jakarta.inject.Singleton;
 
-@Requires(property = "spec.name", value = "ConstructorExceptionSpec")
+@Requires(property = "spec.name", value = "NestedDependencyFailureSpec")
 @Singleton
-public class C {
-    public C() {
-        throw new RuntimeException("bad");
+public class MyClassC {
+    public MyClassC(MyClassD propD) {
+
     }
 }
