@@ -1369,7 +1369,7 @@ public class ConnectionManager {
             }
 
             @Override
-            public boolean dispatch(PoolSink<PoolHandle> sink) {
+            public final boolean dispatch(PoolSink<PoolHandle> sink) {
                 if (!tryEarmarkForRequest()) {
                     return false;
                 }
@@ -1602,7 +1602,7 @@ public class ConnectionManager {
             }
 
             @Override
-            void dispatch0(PoolSink<PoolHandle> sink) {
+            final void dispatch0(PoolSink<PoolHandle> sink) {
                 if (!channel.isActive() || windDownConnection) {
                     // make sure the request isn't dispatched to this connection again
                     windDownConnection();
