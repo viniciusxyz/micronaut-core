@@ -35,8 +35,8 @@ To build your native image without using Docker, install a GraalVM JDK. The easi
 .Installing GraalVM {graalVersion} with SDKMAN!
 [source,bash,subs="attributes+"]
 ----
-$ sdk install java {graalVersion}.-graal
-$ sdk use java {graalVersion}.-graal
+$ sdk install java {graalVersion}-graal
+$ sdk use java {graalVersion}-graal
 ----
 
 Once you install GraalVM, the `native-image` tool becomes available.
